@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import zipfile
 from collections import Counter
@@ -16,6 +15,7 @@ from PIL import Image, UnidentifiedImageError
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
+from galaxeye_ml.classifier import artifact_version
 from galaxeye_ml.features import FEATURE_VERSION, extract_features
 
 EXPECTED_CLASSES = {
@@ -138,11 +138,9 @@ def train(dataset_zip: Path, output_path: Path) -> dict[str, object]:
     threshold, validation = choose_review_threshold(features, labels, classes, class_counts)
     model = new_model()
     model.fit(features, labels)
-    dataset_sha256 = hashlib.sha256(dataset_zip.read_bytes()).hexdigest()
     artifact = {
         "model": model,
         "classes": classes,
-        "model_version": f"rf-rgb-grid-v2-{dataset_sha256[:12]}",
         "feature_version": FEATURE_VERSION,
         "uncertainty_threshold": threshold,
         "validation": validation,
@@ -152,6 +150,7 @@ def train(dataset_zip: Path, output_path: Path) -> dict[str, object]:
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, output_path, compress=3)
+    artifact["model_version"] = artifact_version(output_path)
     return artifact
 
 
