@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -104,12 +105,12 @@ def create_app(
 
         digest = hashlib.sha256(contents).hexdigest()
         store: PredictionStore = app.state.store
-        existing = store.get_by_hash(digest)
+        classifier: LocalClassifier = app.state.classifier
+        existing = store.get_by_hash_and_model(digest, classifier.version)
         if existing:
             response.status_code = 200
             return _response(existing)
 
-        classifier: LocalClassifier = app.state.classifier
         review_threshold = (
             classifier.uncertainty_threshold
             if uncertainty_threshold is None else uncertainty_threshold
@@ -122,10 +123,16 @@ def create_app(
         tile_directory.mkdir(parents=True, exist_ok=True)
         image_path = tile_directory / f"{digest}.png"
         temporary_path = tile_directory / f".{digest}.{uuid.uuid4().hex}.tmp"
+        created_image = False
         try:
-            with Image.open(io.BytesIO(contents)) as image:
-                image.convert("RGB").save(temporary_path, format="PNG")
-            os.replace(temporary_path, image_path)
+            if not image_path.exists():
+                with Image.open(io.BytesIO(contents)) as image:
+                    image.convert("RGB").save(temporary_path, format="PNG")
+                try:
+                    os.link(temporary_path, image_path)
+                    created_image = True
+                except FileExistsError:
+                    pass
         finally:
             temporary_path.unlink(missing_ok=True)
 
@@ -141,8 +148,17 @@ def create_app(
         }
         try:
             saved = store.create(row)
+        except sqlite3.IntegrityError:
+            existing = store.get_by_hash_and_model(digest, classifier.version)
+            if existing:
+                response.status_code = 200
+                return _response(existing)
+            if created_image:
+                image_path.unlink(missing_ok=True)
+            raise
         except Exception:
-            image_path.unlink(missing_ok=True)
+            if created_image:
+                image_path.unlink(missing_ok=True)
             raise
         return _response(saved)
 
@@ -150,10 +166,13 @@ def create_app(
     def list_predictions(
         class_name: Annotated[str | None, Query(alias="class")] = None,
         status: Annotated[str | None, Query(pattern="^(classified|uncertain)$")] = None,
+        image_sha256: Annotated[str | None, Query(pattern="^[0-9a-f]{64}$")] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> PredictionListResponse:
         store: PredictionStore = app.state.store
-        items = [_response(row) for row in store.list(class_name=class_name, status=status, limit=limit)]
+        items = [_response(row) for row in store.list(
+            class_name=class_name, status=status, image_sha256=image_sha256, limit=limit
+        )]
         return PredictionListResponse(items=items, count=len(items))
 
     @app.get("/predictions/{prediction_id}", response_model=PredictionResponse)

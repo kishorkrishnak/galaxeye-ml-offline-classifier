@@ -35,19 +35,20 @@ List predictions or filter by class/status:
 
 ```bash
 curl "http://127.0.0.1:8000/predictions?class=Forest&status=classified"
+curl "http://127.0.0.1:8000/predictions?image_sha256=<hash>"
 curl http://127.0.0.1:8000/predictions/<prediction-id>
 curl http://127.0.0.1:8000/health
 ```
 
-The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. A new tile returns HTTP 201; re-uploading identical bytes returns the existing record with HTTP 200. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`.
+The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. A new tile/model-version pair returns HTTP 201; re-uploading identical bytes with the same model returns the existing record with HTTP 200. After a model update, the same tile gets a new prediction while the old one remains available by ID. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`. Existing databases using hash-only uniqueness are migrated on startup.
 
 ## Design and limits
 
 - **Model:** a scikit-learn Random Forest trained from `candidate_tiles/`. Its features are a small RGB pixel grid, color histograms, and coarse spatial color averages. This is an intentionally simple baseline, not a claim of production accuracy. Inference is local and CPU-only.
 - **Uncertainty:** the forest's predicted class score is stored as `confidence`. The default review threshold is stored in the model artifact and was selected from candidate-only validation predictions (currently `0.40`). A score below it is marked `uncertain`. Set `UNCERTAINTY_THRESHOLD` to override it. The score is not a calibrated probability; the 80% accepted-accuracy target is an illustrative product assumption.
-- **Storage:** normalized PNGs live on disk; SQLite stores queryable metadata and indexes class/status plus timestamp. SHA-256 makes identical uploads idempotent.
+- **Storage:** normalized PNGs live on disk; SQLite stores queryable metadata and indexes class/status plus timestamp. SHA-256 plus model version makes identical uploads idempotent for each model.
 - **Input checks:** only PNG/JPEG, at most 8 MiB and 4096 pixels per side.
-- **Scope:** synchronous inference and a single local SQLite database keep the slice small. Queueing, analyst review UI, authentication, migrations, and multi-process coordination are outside this v1.
+- **Scope:** synchronous inference and a single local SQLite database keep the slice small. Queueing, analyst review UI, authentication, general schema migrations, and multi-process coordination are outside this v1. Startup handles the previous hash-only prediction schema.
 
 ## Check performance and run the tests
 
