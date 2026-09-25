@@ -1,0 +1,13 @@
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+var/
+data/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+/GalaxEye-Backend_Engineer_ML_Systems-TakeHomeAssignment.pdf
+/Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip

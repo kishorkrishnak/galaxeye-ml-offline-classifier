@@ -1,0 +1,92 @@
+"""SQLite persistence for uploaded tiles and their predictions."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS predictions (
+    id TEXT PRIMARY KEY,
+    image_sha256 TEXT NOT NULL UNIQUE,
+    image_path TEXT NOT NULL,
+    predicted_class TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('classified', 'uncertain')),
+    model_version TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_predictions_class_created
+    ON predictions(predicted_class, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_predictions_status_created
+    ON predictions(status, created_at DESC);
+"""
+
+
+class PredictionStore:
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.executescript(SCHEMA)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def get_by_hash(self, image_sha256: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM predictions WHERE image_sha256 = ?", (image_sha256,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create(self, prediction: dict[str, Any]) -> dict[str, Any]:
+        fields = (
+            "id",
+            "image_sha256",
+            "image_path",
+            "predicted_class",
+            "confidence",
+            "status",
+            "model_version",
+            "created_at",
+        )
+        values = tuple(prediction[field] for field in fields)
+        placeholders = ", ".join("?" for _ in fields)
+        with self._connect() as connection:
+            connection.execute(
+                f"INSERT INTO predictions ({', '.join(fields)}) VALUES ({placeholders})",
+                values,
+            )
+        return prediction
+
+    def list(
+        self, *, class_name: str | None, status: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if class_name is not None:
+            clauses.append("predicted_class = ?")
+            parameters.append(class_name)
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM predictions {where} ORDER BY created_at DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get(self, prediction_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM predictions WHERE id = ?", (prediction_id,)
+            ).fetchone()
+        return dict(row) if row else None
