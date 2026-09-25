@@ -55,7 +55,7 @@ def test_classify_and_query_round_trip(tmp_path: Path) -> None:
         assert queried.json()["items"][0]["id"] == saved["id"]
 
         duplicate = client.post("/tiles", files={"file": ("again.png", payload.getvalue(), "image/png")})
-        assert duplicate.status_code == 201
+        assert duplicate.status_code == 200
         assert duplicate.json()["id"] == saved["id"]
 
 
@@ -72,3 +72,9 @@ def test_rejects_non_image_upload(tmp_path: Path) -> None:
     with TestClient(app) as client:
         response = client.post("/tiles", files={"file": ("fake.png", b"not an image", "image/png")})
         assert response.status_code == 400
+
+        image = Image.new("RGB", (4097, 1))
+        payload = io.BytesIO()
+        image.save(payload, format="PNG")
+        response = client.post("/tiles", files={"file": ("wide.png", payload.getvalue(), "image/png")})
+        assert response.status_code == 413

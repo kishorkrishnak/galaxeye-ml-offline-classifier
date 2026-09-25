@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
 from PIL import Image, UnidentifiedImageError
 
@@ -78,7 +78,9 @@ def create_app(
         return {"status": "ok", "model": "loaded"}
 
     @app.post("/tiles", response_model=PredictionResponse, status_code=201)
-    async def classify_tile(file: Annotated[UploadFile, File(...)]) -> PredictionResponse:
+    async def classify_tile(
+        file: Annotated[UploadFile, File(...)], response: Response
+    ) -> PredictionResponse:
         contents = await file.read(MAX_UPLOAD_BYTES + 1)
         if not contents:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -94,6 +96,8 @@ def create_app(
                 image.verify()
         except HTTPException:
             raise
+        except Image.DecompressionBombError:
+            raise HTTPException(status_code=413, detail="Image dimensions are too large")
         except (UnidentifiedImageError, OSError, ValueError):
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid PNG or JPEG image")
 
@@ -101,6 +105,7 @@ def create_app(
         store: PredictionStore = app.state.store
         existing = store.get_by_hash(digest)
         if existing:
+            response.status_code = 200
             return _response(existing)
 
         classifier: LocalClassifier = app.state.classifier
