@@ -24,6 +24,8 @@ class LocalClassifier:
         self.model = artifact["model"]
         self.classes = list(artifact["classes"])
         self.version = str(artifact["model_version"])
+        self.uncertainty_threshold = float(artifact["uncertainty_threshold"])
+        self.validation = artifact["validation"]
 
     def predict(self, image_bytes: bytes) -> tuple[str, float]:
         features = extract_features(image_bytes).reshape(1, -1)

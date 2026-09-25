@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from galaxeye_ml.api import create_app
+from galaxeye_ml.classifier import LocalClassifier
 from galaxeye_ml.train import train
 
 
@@ -29,6 +30,9 @@ def test_classify_and_query_round_trip(tmp_path: Path) -> None:
     model_path = tmp_path / "model.joblib"
     _make_dataset_zip(dataset_zip)
     train(dataset_zip, model_path)
+    classifier = LocalClassifier(model_path)
+    assert 0.0 <= classifier.uncertainty_threshold <= 0.95
+    assert classifier.validation["examples"] == 14
     app = create_app(
         model_path=model_path,
         database_path=tmp_path / "predictions.sqlite3",
@@ -78,3 +82,13 @@ def test_rejects_non_image_upload(tmp_path: Path) -> None:
         image.save(payload, format="PNG")
         response = client.post("/tiles", files={"file": ("wide.png", payload.getvalue(), "image/png")})
         assert response.status_code == 413
+
+        valid = Image.new("RGB", (24, 24), (60, 0, 215))
+        payload = io.BytesIO()
+        valid.save(payload, format="PNG")
+        response = client.post("/tiles", files={"file": ("valid.png", payload.getvalue(), "image/png")})
+        assert response.status_code == 201
+        prediction = response.json()
+        threshold = LocalClassifier(model_path).uncertainty_threshold
+        expected_status = "classified" if prediction["confidence"] >= threshold else "uncertain"
+        assert prediction["status"] == expected_status

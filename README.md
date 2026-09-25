@@ -44,7 +44,7 @@ The upload response includes the predicted class, confidence, status, content ha
 ## Design and limits
 
 - **Model:** a scikit-learn Random Forest trained from `candidate_tiles/`. Its features are a small RGB pixel grid, color histograms, and coarse spatial color averages. This is an intentionally simple baseline, not a claim of production accuracy. Inference is local and CPU-only.
-- **Uncertainty:** the forest's predicted class score is stored as `confidence`. A prediction below `UNCERTAINTY_THRESHOLD` (default `0.50`) is marked `uncertain`. This score is not calibrated probability; a real deployment should choose the threshold using a representative labelled validation set.
+- **Uncertainty:** the forest's predicted class score is stored as `confidence`. The default review threshold is stored in the model artifact and was selected from candidate-only validation predictions (currently `0.40`). A score below it is marked `uncertain`. Set `UNCERTAINTY_THRESHOLD` to override it. The score is not a calibrated probability; the 80% accepted-accuracy target is an illustrative product assumption.
 - **Storage:** normalized PNGs live on disk; SQLite stores queryable metadata and indexes class/status plus timestamp. SHA-256 makes identical uploads idempotent.
 - **Input checks:** only PNG/JPEG, at most 8 MiB and 4096 pixels per side.
 - **Scope:** synchronous inference and a single local SQLite database keep the slice small. Queueing, analyst review UI, authentication, migrations, and multi-process coordination are outside this v1.
@@ -54,11 +54,11 @@ The upload response includes the predicted class, confidence, status, content ha
 The provided eval labels are for measurement only; training ignores `eval_set/` and `eval_labels.csv`.
 
 ```bash
-uv run python -m galaxeye_ml.evaluate --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip
-uv run pytest
+uv run --offline python -m galaxeye_ml.evaluate --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip --report EVALUATION.md
+uv run --offline pytest
 ```
 
-With the current baseline and supplied split, evaluation returned **148/210 correct (70.5%)**. Per-class recall was: AnnualCrop 66.7%, Forest 83.3%, Highway 30.0%, Industrial 93.3%, Residential 73.3%, River 70.0%, and SeaLake 76.7%. This small split is a check on this implementation, not a general accuracy guarantee.
+The detailed [evaluation report](EVALUATION.md) includes precision, recall, F1, the confusion matrix, and the review-threshold trade-off. Overall, **148/210 (70.5%)** eval tiles were correct. At the selected threshold, 143/210 were classified automatically, with 120/143 (83.9%) correct. This small split is a check on this implementation, not a general accuracy guarantee.
 
 Dataset attribution: the supplied tiles are a subset of EuroSAT (Helber et al.) using Sentinel-2 imagery (Copernicus), as noted in the dataset ZIP's README.
 

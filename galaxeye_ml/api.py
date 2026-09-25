@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = Path(os.getenv("MODEL_PATH", ROOT / "artifacts" / "landcover_model.joblib"))
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", ROOT / "var" / "predictions.sqlite3"))
 TILE_DIRECTORY = Path(os.getenv("TILE_DIRECTORY", ROOT / "var" / "tiles"))
-UNCERTAINTY_THRESHOLD = float(os.getenv("UNCERTAINTY_THRESHOLD", "0.50"))
+THRESHOLD_OVERRIDE = os.getenv("UNCERTAINTY_THRESHOLD")
+UNCERTAINTY_THRESHOLD = float(THRESHOLD_OVERRIDE) if THRESHOLD_OVERRIDE is not None else None
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_SIDE = 4096
 ALLOWED_FORMATS = {"PNG", "JPEG"}
@@ -54,9 +55,9 @@ def create_app(
     model_path: Path = MODEL_PATH,
     database_path: Path = DATABASE_PATH,
     tile_directory: Path = TILE_DIRECTORY,
-    uncertainty_threshold: float = UNCERTAINTY_THRESHOLD,
+    uncertainty_threshold: float | None = UNCERTAINTY_THRESHOLD,
 ) -> FastAPI:
-    if not 0.0 <= uncertainty_threshold <= 1.0:
+    if uncertainty_threshold is not None and not 0.0 <= uncertainty_threshold <= 1.0:
         raise ValueError("uncertainty_threshold must be between 0 and 1")
 
     @asynccontextmanager
@@ -109,6 +110,10 @@ def create_app(
             return _response(existing)
 
         classifier: LocalClassifier = app.state.classifier
+        review_threshold = (
+            classifier.uncertainty_threshold
+            if uncertainty_threshold is None else uncertainty_threshold
+        )
         try:
             predicted_class, confidence = classifier.predict(contents)
         except (UnidentifiedImageError, OSError, ValueError):
@@ -130,7 +135,7 @@ def create_app(
             "image_path": str(image_path),
             "predicted_class": predicted_class,
             "confidence": confidence,
-            "status": "classified" if confidence >= uncertainty_threshold else "uncertain",
+            "status": "classified" if confidence >= review_threshold else "uncertain",
             "model_version": classifier.version,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

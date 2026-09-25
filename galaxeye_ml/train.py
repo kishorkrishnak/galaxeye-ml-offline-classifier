@@ -14,6 +14,7 @@ import joblib
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
 from galaxeye_ml.features import FEATURE_VERSION, extract_features
 
@@ -26,6 +27,73 @@ EXPECTED_CLASSES = {
     "River",
     "SeaLake",
 }
+TARGET_ACCEPTED_ACCURACY = 0.80
+MINIMUM_COVERAGE = 0.50
+THRESHOLD_CANDIDATES = [round(step * 0.05, 2) for step in range(20)]
+
+
+def new_model() -> RandomForestClassifier:
+    return RandomForestClassifier(
+        n_estimators=180,
+        min_samples_leaf=2,
+        class_weight="balanced_subsample",
+        n_jobs=-1,
+        random_state=42,
+    )
+
+
+def choose_review_threshold(
+    features: np.ndarray, labels: np.ndarray, classes: list[str], class_counts: Counter[str]
+) -> tuple[float, dict[str, object]]:
+    """Use candidate-only out-of-fold predictions to set an illustrative policy."""
+    smallest_class = min(class_counts.values())
+    if smallest_class < 2:
+        raise ValueError("At least two candidate images per class are needed for validation")
+    folds = min(5, smallest_class)
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=42)
+    probabilities = cross_val_predict(
+        new_model(), features, labels, cv=splitter, method="predict_proba"
+    )
+    predictions = np.asarray(classes)[np.argmax(probabilities, axis=1)]
+    scores = np.max(probabilities, axis=1)
+    correct = predictions == labels
+    rows: list[dict[str, float | int]] = []
+    for threshold in THRESHOLD_CANDIDATES:
+        accepted = scores >= threshold
+        accepted_count = int(np.sum(accepted))
+        rows.append(
+            {
+                "threshold": threshold,
+                "accepted": accepted_count,
+                "coverage": accepted_count / len(labels),
+                "accepted_accuracy": float(np.mean(correct[accepted])) if accepted_count else 0.0,
+            }
+        )
+
+    eligible = [
+        row for row in rows
+        if row["coverage"] >= MINIMUM_COVERAGE
+        and row["accepted_accuracy"] >= TARGET_ACCEPTED_ACCURACY
+    ]
+    if eligible:
+        selected = eligible[0]  # Lowest threshold gives the most accepted tiles.
+        target_met = True
+    else:
+        feasible = [row for row in rows if row["coverage"] >= MINIMUM_COVERAGE]
+        selected = max(feasible, key=lambda row: (row["accepted_accuracy"], row["coverage"]))
+        target_met = False
+
+    validation = {
+        "method": f"{folds}-fold stratified out-of-fold candidate predictions",
+        "examples": int(len(labels)),
+        "overall_accuracy": float(np.mean(correct)),
+        "target_accepted_accuracy": TARGET_ACCEPTED_ACCURACY,
+        "minimum_coverage": MINIMUM_COVERAGE,
+        "target_met": target_met,
+        "selected": selected,
+        "threshold_rows": rows,
+    }
+    return float(selected["threshold"]), validation
 
 
 def load_candidate_tiles(dataset_zip: Path) -> tuple[np.ndarray, np.ndarray, list[str], Counter[str]]:
@@ -67,20 +135,17 @@ def load_candidate_tiles(dataset_zip: Path) -> tuple[np.ndarray, np.ndarray, lis
 
 def train(dataset_zip: Path, output_path: Path) -> dict[str, object]:
     features, labels, classes, class_counts = load_candidate_tiles(dataset_zip)
-    model = RandomForestClassifier(
-        n_estimators=180,
-        min_samples_leaf=2,
-        class_weight="balanced_subsample",
-        n_jobs=-1,
-        random_state=42,
-    )
+    threshold, validation = choose_review_threshold(features, labels, classes, class_counts)
+    model = new_model()
     model.fit(features, labels)
     dataset_sha256 = hashlib.sha256(dataset_zip.read_bytes()).hexdigest()
     artifact = {
         "model": model,
         "classes": classes,
-        "model_version": f"rf-rgb-grid-v1-{dataset_sha256[:12]}",
+        "model_version": f"rf-rgb-grid-v2-{dataset_sha256[:12]}",
         "feature_version": FEATURE_VERSION,
+        "uncertainty_threshold": threshold,
+        "validation": validation,
         "training_examples": int(len(labels)),
         "class_counts": dict(sorted(class_counts.items())),
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -105,6 +170,15 @@ def main() -> None:
     print(f"Training examples: {artifact['training_examples']}")
     print(f"Class counts: {artifact['class_counts']}")
     print(f"Model version: {artifact['model_version']}")
+    validation = artifact["validation"]
+    selected = validation["selected"]
+    print(f"Validation: {validation['method']}, overall accuracy {validation['overall_accuracy']:.1%}")
+    print(
+        f"Review threshold: {artifact['uncertainty_threshold']:.2f}; "
+        f"accepted {selected['accepted']}/{validation['examples']} "
+        f"({selected['coverage']:.1%}) with "
+        f"{selected['accepted_accuracy']:.1%} accuracy"
+    )
 
 
 if __name__ == "__main__":
