@@ -50,7 +50,7 @@ curl http://127.0.0.1:8000/predictions/<prediction-id>
 curl http://127.0.0.1:8000/health
 ```
 
-The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. The model version is the SHA-256 of the exact saved model artifact. A new tile/model-version pair returns HTTP 201; re-uploading identical bytes with the same artifact returns the existing record with HTTP 200. After replacing the artifact, the same tile gets a new prediction while the old one remains available by ID. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`. Existing databases using hash-only uniqueness are migrated on startup.
+The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. The model version is the SHA-256 of the exact saved model artifact. A new tile/model-version pair returns HTTP 201; re-uploading identical bytes with the same artifact returns the existing record with HTTP 200. After replacing the artifact, the same tile gets a new prediction while the old one remains available by ID. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`.
 
 ## Design and limits
 
