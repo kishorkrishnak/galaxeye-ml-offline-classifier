@@ -21,6 +21,16 @@ uv run --offline python -m galaxeye_ml.train --dataset-zip Galaxeye-BE_MLSys-Tak
 
 Training reads only the labelled `candidate_tiles/` folders. The first `uv sync` needs package access unless dependencies were prepared on the machine beforehand. After installation, the API and training command run without internet access.
 
+To package the same API and bundled model in a container, build the image while package access is available, then run it with a persistent data directory:
+
+```bash
+docker build -t galaxeye-ml .
+mkdir -p var
+docker run --rm -p 8000:8000 -v "$(pwd)/var:/app/var" galaxeye-ml
+```
+
+The container needs no network access for inference. The mounted `var/` directory keeps predictions and uploaded tiles across restarts. For an isolated machine, transfer the built image with `docker save` and `docker load`.
+
 ## API
 
 OpenAPI docs: <http://127.0.0.1:8000/docs>
@@ -44,11 +54,7 @@ The upload response includes the predicted class, confidence, status, content ha
 
 ## Design and limits
 
-- **Model:** a scikit-learn Random Forest trained from `candidate_tiles/`. Its features are a small RGB pixel grid, color histograms, and coarse spatial color averages. This is an intentionally simple baseline, not a claim of production accuracy. Inference is local and CPU-only.
-- **Uncertainty:** the forest's predicted class score is stored as `confidence`. The default review threshold is stored in the model artifact and was selected from candidate-only validation predictions (currently `0.40`). A score below it is marked `uncertain`. Set `UNCERTAINTY_THRESHOLD` to override it. The score is not a calibrated probability; the 80% accepted-accuracy target is an illustrative product assumption.
-- **Storage:** normalized PNGs live on disk; SQLite stores queryable metadata and indexes class/status plus timestamp. SHA-256 plus model version makes identical uploads idempotent for each model.
-- **Input checks:** only PNG/JPEG, at most 8 MiB and 4096 pixels per side.
-- **Scope:** synchronous inference and a single local SQLite database keep the slice small. Queueing, analyst review UI, authentication, general schema migrations, and multi-process coordination are outside this v1. Startup handles the previous hash-only prediction schema.
+The service uses a local CPU Random Forest, flags low-scoring predictions for review, and stores normalized tiles on disk with queryable metadata in SQLite. It accepts PNG/JPEG images up to 8 MiB and 4096 pixels per side. The design note covers the trade-offs, assumptions, and items left outside this thin slice.
 
 ## Check performance and run the tests
 
