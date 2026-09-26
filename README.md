@@ -6,17 +6,17 @@ The assignment's 1–2 page approach and trade-off discussion is in [DESIGN.md](
 
 ## Quick start
 
-Requires Python 3.11–3.13 and [`uv`](https://docs.astral.sh/uv/). From this folder:
+Tested with Python 3.12 and [`uv`](https://docs.astral.sh/uv/); `pyproject.toml` allows Python 3.11–3.13. From this folder:
 
 ```bash
 uv sync --python 3.12 --extra dev
 uv run --offline uvicorn galaxeye_ml.api:app --host 127.0.0.1 --port 8000
 ```
 
-The trained `artifacts/landcover_model.joblib` is included, so the API starts without the dataset ZIP. The supplied dataset ZIP is not tracked in Git; place it in this folder to reproduce training or evaluation. Then run:
+The trained `artifacts/landcover_model.joblib` is included, so the API starts without the dataset ZIP. The supplied dataset ZIP is not tracked in Git; place it in this folder to reproduce training or evaluation. To train a separate model without replacing the bundled artifact, run:
 
 ```bash
-uv run --offline python -m galaxeye_ml.train --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip
+uv run --offline python -m galaxeye_ml.train --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip --output artifacts/retrained_model.joblib
 ```
 
 Training reads only the labelled `candidate_tiles/` folders. The first `uv sync` needs package access unless dependencies were prepared on the machine beforehand. After installation, the API and training command run without internet access.
@@ -50,22 +50,22 @@ curl http://127.0.0.1:8000/predictions/<prediction-id>
 curl http://127.0.0.1:8000/health
 ```
 
-The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. The model version is the SHA-256 of the exact saved model artifact. A new tile/model-version pair returns HTTP 201; re-uploading identical bytes with the same artifact returns the existing record with HTTP 200. After replacing the artifact and restarting the service, the same tile gets a new prediction while the old one remains available by ID. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`.
+The upload response includes the predicted class, confidence, status, content hash, model version, ID, and timestamp. The model version is the SHA-256 of the exact saved model artifact. A new tile/model-version pair returns HTTP 201; re-uploading identical bytes with the same artifact returns the existing record with HTTP 200. After replacing the artifact and restarting the service, the same tile gets a new prediction while the old one remains available by ID. The service does not archive previous model files, so retain them separately if old predictions must be replayed. The uploaded image is stored under `var/tiles/`; SQLite metadata is stored under `var/predictions.sqlite3`.
 
 ## Design and limits
 
-The service uses a local CPU Random Forest, flags low-scoring predictions for review, and stores normalized tiles on disk with queryable metadata in SQLite. It accepts PNG/JPEG images up to 8 MiB and 4096 pixels per side. The design note covers the trade-offs, assumptions, and items left outside this thin slice.
+The service uses a local CPU Random Forest, flags low-scoring predictions for review, and stores normalized tiles on disk with queryable metadata in SQLite. It accepts PNG/JPEG images up to 8 MiB and 4096 pixels per side. The model's default review threshold is `0.40`; `UNCERTAINTY_THRESHOLD` can override it for new predictions. Existing rows keep the status assigned when they were saved. The design note covers the trade-offs, assumptions, and items left outside this thin slice.
 
 ## Check performance and run the tests
 
 The provided eval labels are for measurement only; training ignores `eval_set/` and `eval_labels.csv`.
 
 ```bash
-uv run --offline python -m galaxeye_ml.evaluate --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip --report EVALUATION.md
+uv run --offline python -m galaxeye_ml.evaluate --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip
 uv run --offline pytest
 ```
 
-The detailed [evaluation report](EVALUATION.md) includes precision, recall, F1, the confusion matrix, and the review-threshold trade-off. Overall, **148/210 (70.5%)** eval tiles were correct. At the selected threshold, 143/210 were classified automatically, with 120/143 (83.9%) correct. This small split is a check on this implementation, not a general accuracy guarantee.
+The command prints an evaluation of the bundled model. To evaluate a retrained model, add `--model artifacts/retrained_model.joblib`. The checked-in [evaluation report](EVALUATION.md) includes precision, recall, F1, the confusion matrix, and the review-threshold trade-off for the bundled artifact. Overall, **148/210 (70.5%)** eval tiles were correct. At the selected threshold, 143/210 were classified automatically, with 120/143 (83.9%) correct. This small split is a check on this implementation, not a general accuracy guarantee.
 
 Dataset attribution: the supplied tiles are a subset of EuroSAT (Helber et al.) using Sentinel-2 imagery (Copernicus), as noted in the dataset ZIP's README.
 
@@ -73,5 +73,5 @@ Dataset attribution: the supplied tiles are a subset of EuroSAT (Helber et al.) 
 
 1. **If the classifier is wrong 30% of the time:** first define the decision it supports and the cost of false positives versus missed detections. Measure per-class precision/recall and confusion on representative, held-out labelled data, not just overall accuracy. Compare that with a simple baseline and the analyst's current process. Use a review/uncertain path for low-confidence predictions, and only call the model useful if it improves the workflow at an acceptable error cost.
 2. **Checking an unattended offline deployment:** keep local logs and counters for received tiles, inference errors/latency, storage failures, and class/confidence distributions. Run periodic known-answer canary images and check that their outputs and model version remain stable. When analysts later label samples, compare them against saved predictions to detect drift; provide a way to export these diagnostics during maintenance.
-3. **Finding wrong stored results:** reproduce with the tile ID and stored image. If the source is available, compare its byte hash with the recorded hash and its oriented RGB pixels with the saved PNG. Check request parsing and image transforms, then run the exact stored model artifact and compare raw output. Check model/version metadata and class-index mapping. Finally inspect the persistence path, SQLite row, and any duplicate/retry behavior. This separates bad input, inference, and storage issues in order.
+3. **Finding wrong stored results:** reproduce with the tile ID and stored image. If the source is available, compare its byte hash with the recorded hash and its oriented RGB pixels with the saved PNG. Check request parsing and image transforms, then rerun the matching model artifact if it was retained and compare raw output. Check model/version metadata and class-index mapping. Finally inspect the persistence path, SQLite row, and any duplicate/retry behavior. This separates bad input, inference, and storage issues in order.
 4. **Weakest part:** the baseline model uses simple RGB features and its confidence is an uncalibrated class score. Similar-looking land classes or different sensors/seasons may confuse it first. A representative labelled validation set and a stronger, validated model would be the first improvements.
