@@ -13,7 +13,7 @@ uv sync --python 3.12 --extra dev
 uv run --offline uvicorn galaxeye_ml.api:app --host 127.0.0.1 --port 8000
 ```
 
-The trained `artifacts/landcover_model.joblib` is included, so the API starts without the dataset ZIP. To reproduce training with the supplied ZIP, run:
+The trained `artifacts/landcover_model.joblib` is included, so the API starts without the dataset ZIP. The supplied dataset ZIP is not tracked in Git; place it in this folder to reproduce training or evaluation. Then run:
 
 ```bash
 uv run --offline python -m galaxeye_ml.train --dataset-zip Galaxeye-BE_MLSys-TakeHome_Assignment-Tiles.zip
