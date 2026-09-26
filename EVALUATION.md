@@ -1,6 +1,6 @@
 # Model evaluation
 
-Model artifact: `artifact-sha256-a7b9e4e6e8ee9647a6913254c0ce61b5c6718847b5988dc5202214571dca591a`. Training and threshold selection used only the 1050 labelled `candidate_tiles`. The 210 labelled `eval_set` tiles were used for reporting, not model fitting or threshold selection.
+Model: `artifact-sha256-a7b9e4e6e8ee9647a6913254c0ce61b5c6718847b5988dc5202214571dca591a`. Training and threshold selection used only the 1050 labelled `candidate_tiles`. The 210 labelled `eval_set` tiles were used for reporting, not model fitting or threshold selection.
 
 ## Review threshold from candidate tiles
 

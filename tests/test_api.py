@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageOps
 
 from galaxeye_ml.api import create_app
 from galaxeye_ml.classifier import LocalClassifier
@@ -61,6 +61,23 @@ def test_classify_and_query_round_trip(tmp_path: Path) -> None:
         duplicate = client.post("/tiles", files={"file": ("again.png", payload.getvalue(), "image/png")})
         assert duplicate.status_code == 200
         assert duplicate.json()["id"] == saved["id"]
+
+        oriented = Image.new("RGB", (24, 16), (255, 0, 0))
+        oriented.paste((0, 0, 255), (0, 0, 12, 16))
+        exif = Image.Exif()
+        exif[274] = 6
+        oriented_bytes = io.BytesIO()
+        oriented.save(oriented_bytes, format="JPEG", exif=exif)
+        oriented_payload = oriented_bytes.getvalue()
+        oriented_response = client.post(
+            "/tiles", files={"file": ("oriented.jpg", oriented_payload, "image/jpeg")}
+        )
+        assert oriented_response.status_code == 201
+        stored_path = tmp_path / "tiles" / f"{oriented_response.json()['image_sha256']}.png"
+        with Image.open(io.BytesIO(oriented_payload)) as source, Image.open(stored_path) as stored:
+            expected = ImageOps.exif_transpose(source).convert("RGB")
+            assert stored.size == expected.size
+            assert stored.tobytes() == expected.tobytes()
 
 
 def test_rejects_non_image_upload(tmp_path: Path) -> None:

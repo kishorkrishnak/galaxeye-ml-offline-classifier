@@ -14,7 +14,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from galaxeye_ml.classifier import LocalClassifier
 from galaxeye_ml.storage import PredictionStore
@@ -127,7 +127,7 @@ def create_app(
         try:
             if not image_path.exists():
                 with Image.open(io.BytesIO(contents)) as image:
-                    image.convert("RGB").save(temporary_path, format="PNG")
+                    ImageOps.exif_transpose(image).convert("RGB").save(temporary_path, format="PNG")
                 try:
                     os.link(temporary_path, image_path)
                     created_image = True
